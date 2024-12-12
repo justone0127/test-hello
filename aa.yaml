@@ -1,0 +1,145 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: eap64-poc-template
+  annotations:
+    description: "An example JBoss EAP 6.4 PoC application."
+    iconClass: "icon-eap"
+    openshift.io/display-name: "EAP 6.4 PoC"
+    version: "6.4"
+objects:
+  # BuildConfig
+  - apiVersion: build.openshift.io/v1
+    kind: BuildConfig
+    metadata:
+      name: ${APPLICATION_NAME}
+    spec:
+      source:
+        type: Git
+        git:
+          uri: ${GIT_REPO_URL}
+          ref: ${GIT_BRANCH}
+        contextDir: ${CONTEXT_DIR}
+      strategy:
+        dockerStrategy:
+          dockerfilePath: Dockerfile
+      output:
+        to:
+          kind: ImageStreamTag
+          name: ${EAP_IMAGE_NAME}
+      triggers:
+        - type: GitHub
+          github:
+            secret: ${GITHUB_WEBHOOK_SECRET}
+        - type: Generic
+          generic:
+            secret: ${GITLAB_WEBHOOK_SECRET}
+        - type: ConfigChange
+  # ImageStream
+  - apiVersion: image.openshift.io/v1
+    kind: ImageStream
+    metadata:
+      name: ${APPLICATION_NAME}
+  # Deployment
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: ${APPLICATION_NAME}
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: ${APPLICATION_NAME}
+      template:
+        metadata:
+          labels:
+            app: ${APPLICATION_NAME}
+        spec:
+          containers:
+            - name: ${APPLICATION_NAME}
+              image: image-registry.openshift-image-registry.svc:5000/${IMAGE_STREAM_NAMESPACE}/${EAP_IMAGE_NAME}
+              ports:
+                - containerPort: 8080
+                  name: http
+              resources:
+                limits:
+                  memory: ${MEMORY_LIMIT}
+                  cpu: ${CPU_LIMIT}
+              readinessProbe:
+                httpGet:
+                  path: /
+                  port: 8080
+                initialDelaySeconds: 10
+                periodSeconds: 5
+              livenessProbe:
+                httpGet:
+                  path: /
+                  port: 8080
+                initialDelaySeconds: 60
+                periodSeconds: 10
+  # Service
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: ${APPLICATION_NAME}
+    spec:
+      ports:
+        - port: 8080
+          targetPort: 8080
+      selector:
+        app: ${APPLICATION_NAME}
+  # Route
+  - apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata:
+      name: ${APPLICATION_NAME}
+    spec:
+      to:
+        kind: Service
+        name: ${APPLICATION_NAME}
+      port:
+        targetPort: 8080
+      tls:
+        termination: edge
+        insecureEdgeTerminationPolicy: Redirect
+parameters:
+  - name: APPLICATION_NAME
+    description: The name of the application.
+    required: true
+    value: "eap64-app"
+  - name: GIT_REPO_URL
+    description: The Git repository URL for the application.
+    required: true
+    value: "https://github.com/your-repo/your-app.git"
+  - name: GIT_BRANCH
+    description: The Git branch or tag to use.
+    required: false
+    value: "main"
+  - name: CONTEXT_DIR
+    description: Path within Git project to locate Dockerfile and WAR file.
+    required: false
+    value: ""
+  - name: IMAGE_STREAM_NAMESPACE
+    description: Namespace where the ImageStreams are located.
+    required: true
+    value: "openshift"
+  - name: EAP_IMAGE_NAME
+    description: Name and tag of the EAP ImageStream (e.g., jboss-eap64-openshift:1.0).
+    required: true
+    value: "jboss-eap64-openshift:1.0"
+  - name: MEMORY_LIMIT
+    description: Memory limit for the application.
+    required: true
+    value: "4Gi"
+  - name: CPU_LIMIT
+    description: CPU limit for the application.
+    required: true
+    value: "2"
+  - name: GITHUB_WEBHOOK_SECRET
+    description: Webhook secret for GitHub.
+    required: true
+    value: "github-secret"
+  - name: GITLAB_WEBHOOK_SECRET
+    description: Webhook secret for GitLab.
+    required: true
+    value: "gitlab-secret"
